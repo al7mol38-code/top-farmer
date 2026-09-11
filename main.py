@@ -1,8 +1,113 @@
+import os
+import discord
+from discord.ext import commands
+import time
+import sqlite3
+from database import init_db, get_user_data, update_user_data, reset_user_data
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.voice_states = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+voice_sessions = {}   
+
+TARGET_CHANNEL_ID = 1533463995795636366
+ALLOWED_ROLE_IDS = [1547803947295580240, 1533463569683845160, 1533463570564649121]
+RESET_ROLE_IDS = [1533463569683845160, 1533463570564649121]
+
+@bot.event
+async def on_ready():
+    init_db()
+    print(f"تم تسجيل الدخول بنجاح باسم: {bot.user} وقاعدة البيانات تعمل بنجاح.")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    
+    update_user_data(message.author.id, messages_add=1)
+    await bot.process_commands(message)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+    
+    user_id = member.id
+    current_time = time.time()
+    is_muted = after.self_mute or after.mute or after.self_deaf or after.deaf
+
+    if before.channel is None and after.channel is not None:
+        if not is_muted:
+            voice_sessions[user_id] = current_time
+
+    elif before.channel is not None and after.channel is None:
+        if user_id in voice_sessions:
+            duration = current_time - voice_sessions[user_id]
+            update_user_data(user_id, voice_add=duration)
+            del voice_sessions[user_id]
+
+    elif before.channel is not None and after.channel is not None:
+        if is_muted and user_id in voice_sessions:
+            duration = current_time - voice_sessions[user_id]
+            update_user_data(user_id, voice_add=duration)
+            del voice_sessions[user_id]
+        elif not is_muted and user_id not in voice_sessions:
+            voice_sessions[user_id] = current_time
+
+# 1. أمر الحذف
+@bot.command(name="حذف")
+async def delete_messages(ctx, limit: int = 10):
+    if not any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles):
+        await ctx.reply("عذراً، لا تمتلك الرتبة الصلاحية لاستخدام هذا الأمر.", delete_after=5)
+        return
+
+    if not ctx.message.reference:
+        await ctx.reply("يرجى الرد (Reply) على رسالة الشخص المراد حذف رسائله.", delete_after=5)
+        return
+
+    referenced_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    target_user = referenced_message.author
+
+    deleted = await ctx.channel.purge(limit=limit, check=lambda m: m.author.id == target_user.id)
+    await ctx.send(f"تم حذف {len(deleted)} رسالة للعضو {target_user.mention}.", delete_after=5)
+
+# 2. أمر النشاط
+@bot.command(name="نشاط")
+async def activity_stats(ctx, member: discord.Member = None):
+    if ctx.channel.id != TARGET_CHANNEL_ID:
+        await ctx.reply(f"عذراً، يرجى استخدام أمر النشاط داخل الروم المخصص فقط: <#{TARGET_CHANNEL_ID}>", delete_after=5)
+        return
+
+    target = member or ctx.author
+    u_id = target.id
+    
+    data = get_user_data(u_id)
+    msgs = data['messages']
+    total_seconds = data['voice_seconds']
+    
+    if u_id in voice_sessions:
+        total_seconds += (time.time() - voice_sessions[u_id])
+    
+    minutes = int(total_seconds // 60)
+    hours = minutes // 60
+    rem_mins = minutes % 60
+
+    embed = discord.Embed(title=f"إحصائيات تفاعل العضو: {target.display_name}", color=discord.Color.blue())
+    embed.description = f"مرحباً بك، هذه هي إحصائيات تفاعل {target.mention}:"
+    embed.add_field(name="💬 عدد الرسائل", value=f"{msgs} رسالة", inline=False)
+    embed.add_field(name="🔊 الوقت الصوتي (النشط فقط)", value=f"{hours} ساعة و {rem_mins} دقيقة", inline=False)
+    
+    await ctx.reply(embed=embed, mention_author=True)
+
+# 3. أمر المتصدرين (Leaderboard)
 @bot.command(name="متصدرين")
 async def leaderboard(ctx):
     conn = sqlite3.connect('bot_data.db')
     cursor = conn.cursor()
-    # جلب أكثر 3 أعضاء تفاعلاً بناءً على مجموع الرسائل ووقت الصوت
     cursor.execute('''
         SELECT user_id, messages, voice_seconds 
         FROM activity 
@@ -16,7 +121,6 @@ async def leaderboard(ctx):
         await ctx.reply("لا توجد بيانات تفاعل مسجلة حتى الآن.", delete_after=5)
         return
 
-    # إعداد بيانات المراكز الثلاثة (افتراضي إن وجدوا)
     data = []
     for row in top_users:
         u_id, msgs, v_secs = row
@@ -30,11 +134,9 @@ async def leaderboard(ctx):
         
         data.append({"mention": mention, "msgs": f"{msgs} رسالة", "voice": voice_str})
 
-    # تكملة المراكز في حال كان عدد الأعضاء أقل من 3
     while len(data) < 3:
         data.append({"mention": "---", "msgs": "0 رسالة", "voice": "0 ساعة و 0 دقيقة"})
 
-    # بناء نص الـ Embed
     description = f"""> *"Absolute Farmer"* 🎬
 .. قائمة الأعضاء الأكثر نشاطاً وتأثيراً في الكتابي والصوتي:
 
@@ -56,9 +158,33 @@ async def leaderboard(ctx):
         description=description,
         color=discord.Color.gold()
     )
-    
-    # ربط الصورة مباشرة بالـ Embed (تأكد من رفع الصورة أو وضع رابطها المباشر هنا)
-    # يمكنك وضع رابط الصورة المباشر أو إرفاقها كملف محلي
-    embed.set_image(url="رابط_الصورة_المباشر_هنا") # أو ضع ملف مرفق إذا أردت
 
     await ctx.reply(embed=embed, mention_author=True)
+
+# 4. أمر ريست (تصفير)
+@bot.command(name="ريست")
+async def reset_stats(ctx, member: discord.Member = None):
+    if not any(role.id in RESET_ROLE_IDS for role in ctx.author.roles):
+        await ctx.reply("عذراً، هذا الأمر مخصص لرتب الإدارة المحددة فقط.", delete_after=5)
+        return
+
+    target = member
+    if not target and ctx.message.reference:
+        try:
+            ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            target = ref_msg.author
+        except:
+            pass
+
+    if not target:
+        await ctx.reply("يرجى عمل منشن للعضو أو الرد على رسالته لتصفير إحصائياته.", delete_after=5)
+        return
+
+    u_id = target.id
+    reset_user_data(u_id)
+    if u_id in voice_sessions:
+        voice_sessions[u_id] = time.time()
+
+    await ctx.reply(f"✅ تم تصفير إحصائيات العضو {target.mention} بنجاح من قاعدة البيانات.", mention_author=True)
+
+bot.run(os.getenv("DISCORD_TOKEN"))
