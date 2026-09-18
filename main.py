@@ -18,6 +18,8 @@ TARGET_CHANNEL_ID = 1533463995795636366
 ALLOWED_ROLE_IDS = [1547803947295580240, 1533463569683845160, 1533463570564649121]
 RESET_ROLE_IDS = [1533463569683845160, 1533463570564649121]
 
+DB_PATH = '/data/bot_data.db' if os.path.exists('/data') else 'bot_data.db'
+
 @bot.event
 async def on_ready():
     init_db()
@@ -103,10 +105,10 @@ async def activity_stats(ctx, member: discord.Member = None):
     
     await ctx.reply(embed=embed, mention_author=True)
 
-# 3. أمر المتصدرين (Leaderboard) مع الصورة
+# 3. أمر المتصدرين (Leaderboard) مع الصورة والتصميم المطلوب
 @bot.command(name="متصدرين")
 async def leaderboard(ctx):
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT user_id, messages, voice_seconds 
@@ -159,7 +161,7 @@ async def leaderboard(ctx):
         color=discord.Color.gold()
     )
     
-    # إضافة رابط الصورة المباشر هنا
+    # رابط صورة Absolute Cinema (استبدله برابط صورتك المباشر إن أردت)
     embed.set_image(url="https://i.imgur.com/ضع_رابط_الصورة_المباشر_هنا.jpg")
 
     await ctx.reply(embed=embed, mention_author=True)
@@ -190,21 +192,19 @@ async def reset_stats(ctx, member: discord.Member = None):
 
     await ctx.reply(f"✅ تم تصفير إحصائيات العضو {target.mention} بنجاح من قاعدة البيانات.", mention_author=True)
 
-# 5. أمر ريست الكل (تصفير إحصائيات جميع أعضاء السيرفر)
-@bot.command(name="ريست-الكل")
+# 5. أمر ريست الكل (للجميع)
+@bot.command(name="ريست-الكل", aliases=["ريست_الكل"])
 async def reset_all_stats(ctx):
     if not any(role.id in RESET_ROLE_IDS for role in ctx.author.roles):
         await ctx.reply("عذراً، هذا الأمر مخصص لرتب الإدارة المحددة فقط.", delete_after=5)
         return
 
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # حذف أو تصفير جميع السجلات في جدول النشاط
     cursor.execute('DELETE FROM activity')
     conn.commit()
     conn.close()
 
-    # مسح الجلسات الصوتية النشطة حالياً وإعادة جدولتها من جديد لمن هم في الرومات
     current_time = time.time()
     voice_sessions.clear()
     for guild in ctx.bot.guilds:
