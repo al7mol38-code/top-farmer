@@ -1,7 +1,11 @@
 import sqlite3
+import os
+
+# استخدام مجلد /data الدائم في راندر إن وجد، وإلا المجلد المحلي للاختبار
+DB_PATH = '/data/bot_data.db' if os.path.exists('/data') else 'bot_data.db'
 
 def init_db():
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity (
@@ -14,7 +18,7 @@ def init_db():
     conn.close()
 
 def get_user_data(user_id):
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT messages, voice_seconds FROM activity WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
@@ -24,7 +28,7 @@ def get_user_data(user_id):
     return {'messages': 0, 'voice_seconds': 0.0}
 
 def update_user_data(user_id, messages_add=0, voice_add=0.0):
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO activity (user_id, messages, voice_seconds) VALUES (?, 0, 0.0)', (user_id,))
     cursor.execute('''
@@ -36,7 +40,7 @@ def update_user_data(user_id, messages_add=0, voice_add=0.0):
     conn.close()
 
 def reset_user_data(user_id):
-    conn = sqlite3.connect('bot_data.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('UPDATE activity SET messages = 0, voice_seconds = 0.0 WHERE user_id = ?', (user_id,))
     conn.commit()
