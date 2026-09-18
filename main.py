@@ -103,7 +103,7 @@ async def activity_stats(ctx, member: discord.Member = None):
     
     await ctx.reply(embed=embed, mention_author=True)
 
-# 3. أمر المتصدرين (Leaderboard)
+# 3. أمر المتصدرين (Leaderboard) مع الصورة
 @bot.command(name="متصدرين")
 async def leaderboard(ctx):
     conn = sqlite3.connect('bot_data.db')
@@ -158,10 +158,13 @@ async def leaderboard(ctx):
         description=description,
         color=discord.Color.gold()
     )
+    
+    # إضافة رابط الصورة المباشر هنا
+    embed.set_image(url="https://i.imgur.com/ضع_رابط_الصورة_المباشر_هنا.jpg")
 
     await ctx.reply(embed=embed, mention_author=True)
 
-# 4. أمر ريست (تصفير)
+# 4. أمر ريست (تصفير لشخص واحد)
 @bot.command(name="ريست")
 async def reset_stats(ctx, member: discord.Member = None):
     if not any(role.id in RESET_ROLE_IDS for role in ctx.author.roles):
@@ -186,5 +189,31 @@ async def reset_stats(ctx, member: discord.Member = None):
         voice_sessions[u_id] = time.time()
 
     await ctx.reply(f"✅ تم تصفير إحصائيات العضو {target.mention} بنجاح من قاعدة البيانات.", mention_author=True)
+
+# 5. أمر ريست الكل (تصفير إحصائيات جميع أعضاء السيرفر)
+@bot.command(name="ريست-الكل")
+async def reset_all_stats(ctx):
+    if not any(role.id in RESET_ROLE_IDS for role in ctx.author.roles):
+        await ctx.reply("عذراً، هذا الأمر مخصص لرتب الإدارة المحددة فقط.", delete_after=5)
+        return
+
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    # حذف أو تصفير جميع السجلات في جدول النشاط
+    cursor.execute('DELETE FROM activity')
+    conn.commit()
+    conn.close()
+
+    # مسح الجلسات الصوتية النشطة حالياً وإعادة جدولتها من جديد لمن هم في الرومات
+    current_time = time.time()
+    voice_sessions.clear()
+    for guild in ctx.bot.guilds:
+        for member in guild.members:
+            if member.voice and member.voice.channel:
+                is_muted = member.voice.self_mute or member.voice.mute or member.voice.self_deaf or member.voice.deaf
+                if not is_muted:
+                    voice_sessions[member.id] = current_time
+
+    await ctx.reply("⚠️ **تم تصفير إحصائيات (الرسائل والوقت الصوتي) لجميع أعضاء السيرفر بالكامل بنجاح!**", mention_author=True)
 
 bot.run(os.getenv("DISCORD_TOKEN"))
